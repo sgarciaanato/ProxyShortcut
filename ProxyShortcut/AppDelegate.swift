@@ -7,6 +7,7 @@
 
 import Cocoa
 import Foundation
+import IOKit.pwr_mgt
 import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -15,6 +16,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var timer: Timer?
     var secondsElapsed = 60
     var fullScreenController: FullScreenWindowController?
+    var assertionID: IOPMAssertionID = 0
+    var caffeinateItem: NSMenuItem!
+    var isCaffeinated = false
 
     struct Proxy {
         let name: String
@@ -60,7 +64,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(proxyToggleItem)
         }
         menu.addItem(NSMenuItem.separator())
-        let timerItem = NSMenuItem(title: "Start Timer", action: #selector(startTimer), keyEquivalent: "")
+        let zoomItem = NSMenuItem(title: "cl.mobile", action: #selector(openZoomRoom), keyEquivalent: "z")
+        zoomItem.target = self
+        menu.addItem(zoomItem)
+        menu.addItem(NSMenuItem.separator())
+        caffeinateItem = NSMenuItem(title: "caffeinate -d", action: #selector(toggleCaffeinate), keyEquivalent: "c")
+        caffeinateItem.target = self
+        menu.addItem(caffeinateItem)
+        menu.addItem(NSMenuItem.separator())
+        let timerItem = NSMenuItem(title: "Start Timer", action: #selector(startTimer), keyEquivalent: "t")
         timerItem.target = self
         menu.addItem(timerItem)
         menu.addItem(NSMenuItem.separator())
@@ -72,6 +84,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         timer?.invalidate()
         statusItem?.button?.title = ""
+        caffeinateItem?.state = isCaffeinated ? .on : .off
         for (index, proxy) in proxies.enumerated() {
             menu.item(at: index)?.state = getProxyStatus(proxy: proxy, interface: interface) ? .on : .off
         }
@@ -97,6 +110,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             task.waitUntilExit()
         } catch {
             print("Error al ejecutar el comando: \(error)")
+        }
+    }
+
+    @objc func openZoomRoom() {
+        let zoomRoomURL = URL(string: "https://walmart.zoom.us/my/cl.mobile")!
+        NSWorkspace.shared.open(zoomRoomURL)
+    }
+
+    @objc func toggleCaffeinate() {
+        if isCaffeinated {
+            IOPMAssertionRelease(assertionID)
+            isCaffeinated = false
+        } else {
+            let reasonForActivity = "Prevent display sleep" as CFString
+            IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+                                        IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                                        reasonForActivity,
+                                        &assertionID)
+            isCaffeinated = true
         }
     }
 
@@ -155,7 +187,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 class FullScreenWindowController: NSWindowController {
-    let closeButton: NSButton = NSButton()
+    let closeButton = NSButton()
 
     convenience init(image: NSImage) {
         let screenFrame = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
@@ -163,15 +195,15 @@ class FullScreenWindowController: NSWindowController {
         window.level = .mainMenu + 1
         window.isOpaque = true
         window.backgroundColor = .black
-        window.collectionBehavior = [.fullScreenPrimary]
-
-        self.init(window: window)
+        window.collectionBehavior = [.canJoinAllSpaces]
 
         // ImageView
         let imageView = NSImageView(frame: screenFrame)
         imageView.image = image
         imageView.imageScaling = .scaleProportionallyUpOrDown
         window.contentView = imageView
+
+        self.init(window: window)
 
         // Close Button
         let buttonSize: CGFloat = 44
@@ -196,8 +228,11 @@ class FullScreenWindowController: NSWindowController {
     }
 
     func show() {
+        // Solo ocupa toda la pantalla, pero no entra en modo "full screen" de macOS
+        if let screenFrame = NSScreen.main?.frame {
+            window?.setFrame(screenFrame, display: true)
+        }
         window?.makeKeyAndOrderFront(nil)
-        window?.toggleFullScreen(nil)
     }
 
     @objc func closeWindow() {
