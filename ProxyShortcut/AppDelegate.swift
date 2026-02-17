@@ -6,6 +6,7 @@
 //
 
 import Cocoa
+import Darwin
 import Foundation
 import IOKit.pwr_mgt
 import SwiftUI
@@ -21,6 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var caffeinateItem: NSMenuItem!
     var isCaffeinated = false
     var dynamicStore: SCDynamicStore?
+    var freePercent: Int = 0
 
     func setupProxyMonitor() {
         var context = SCDynamicStoreContext(version: 0, info: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()), retain: nil, release: nil, copyDescription: nil)
@@ -70,6 +72,53 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         task.waitUntilExit()
     }
 
+    func getFreeMemoryPercentage() -> Int {
+        var size = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)
+        var stats = vm_statistics64_data_t()
+
+        let result = withUnsafeMutablePointer(to: &stats) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(size)) {
+                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &size)
+            }
+        }
+
+        if result == KERN_SUCCESS {
+            let pageSize = UInt64(vm_kernel_page_size)
+            // macOS considera "usada" la memoria Activa + Wired + Comprimida
+            let used = UInt64(stats.active_count + stats.wire_count + stats.compressor_page_count) * pageSize
+            let total = ProcessInfo.processInfo.physicalMemory
+
+            return Int((1.0 - Double(used) / Double(total)) * 100)
+        }
+        return 0
+    }
+
+    var memoryTimer: Timer?
+
+    func monitor() {
+        freePercent = getFreeMemoryPercentage()
+
+        // Actualizamos la UI en el hilo principal
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            var title = "\(freePercent)%"
+            if secondsElapsed > 0, timer != nil {
+                title += " (\(secondsElapsed)s)"
+            }
+            statusItem?.button?.title = title
+            // Opcional: Cambiar el icono según el estado
+            statusItem?.button?.imagePosition = .imageLeft
+        }
+    }
+
+    func startMemoryMonitor() {
+        // Actualiza cada 3 segundos
+        memoryTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            monitor()
+        }
+    }
+
     struct Proxy {
         let name: String
         let getCommand: String
@@ -102,6 +151,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.target = self
         }
         setupProxyMonitor()
+        startMemoryMonitor()
+        monitor()
     }
 
     @objc func showMenu() {
@@ -135,10 +186,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         timer?.invalidate()
         statusItem?.button?.title = ""
+        secondsElapsed = 0
         caffeinateItem?.state = isCaffeinated ? .on : .off
         for (index, proxy) in proxies.enumerated() {
             menu.item(at: index)?.state = getProxyStatus(proxy: proxy, interface: interface) ? .on : .off
         }
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        monitor()
     }
 
     @objc func quit() {
@@ -194,7 +250,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let statusItem else { return }
         if secondsElapsed > 0 {
             secondsElapsed -= 1
-            statusItem.button?.title = "\(secondsElapsed)"
+            statusItem.button?.title = "\(freePercent)% (\(secondsElapsed)s)"
         } else {
             timer?.invalidate()
             statusItem.button?.title = ""
