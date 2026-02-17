@@ -9,6 +9,7 @@ import Cocoa
 import Foundation
 import IOKit.pwr_mgt
 import SwiftUI
+import SystemConfiguration
 
 class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var statusItem: NSStatusItem?
@@ -19,6 +20,55 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var assertionID: IOPMAssertionID = 0
     var caffeinateItem: NSMenuItem!
     var isCaffeinated = false
+    var dynamicStore: SCDynamicStore?
+
+    func setupProxyMonitor() {
+        var context = SCDynamicStoreContext(version: 0, info: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()), retain: nil, release: nil, copyDescription: nil)
+
+        // Creamos el store con un callback
+        dynamicStore = SCDynamicStoreCreate(nil, "ProxyMonitor" as CFString, { (store, keys, info) in
+            guard let info = info else { return }
+
+            // Recuperamos la instancia de AppDelegate
+            let appDelegate = Unmanaged<AppDelegate>.fromOpaque(info).takeUnretainedValue()
+
+            // Ejecutar en el hilo principal para interactuar con networksetup
+            DispatchQueue.main.async {
+                appDelegate.checkAndFixProxies()
+            }
+        }, &context)
+
+        // Registramos la llave que observa cambios en Proxies
+        let key = SCDynamicStoreKeyCreateProxies(nil)
+        SCDynamicStoreSetNotificationKeys(dynamicStore!, [key] as CFArray, nil)
+
+        // Añadir al run loop actual
+        let runLoopSource = SCDynamicStoreCreateRunLoopSource(nil, dynamicStore!, 0)
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+    }
+
+    func checkAndFixProxies() {
+        print("Cambio detectado en la configuración de red. Verificando proxies...")
+
+        for proxy in proxies {
+            let isEnabled = getProxyStatus(proxy: proxy, interface: interface)
+
+            // EJEMPLO: Si quieres que siempre estén OFF
+            if isEnabled, proxy.name == "Automatic proxy configuration" {
+                print("\(proxy.name) detectado como ON. Revirtiendo a OFF...")
+                forceProxyState(proxy: proxy, state: "off")
+            }
+        }
+    }
+
+    // Función auxiliar para no depender de un NSMenuItem
+    func forceProxyState(proxy: Proxy, state: String) {
+        let task = Process()
+        task.launchPath = "/usr/sbin/networksetup"
+        task.arguments = [proxy.setCommand, interface, state]
+        try? task.run()
+        task.waitUntilExit()
+    }
 
     struct Proxy {
         let name: String
@@ -51,6 +101,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.action = #selector(showMenu)
             button.target = self
         }
+        setupProxyMonitor()
     }
 
     @objc func showMenu() {
