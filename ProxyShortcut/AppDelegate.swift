@@ -138,7 +138,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             setCommand: "setwebproxystate"
         ),
         Proxy(
-            name: "Automatic proxy configuration",
+            name: "Secure web proxy (HTTPS)",
             getCommand: "getsecurewebproxy",
             setCommand: "setsecurewebproxystate"
         )
