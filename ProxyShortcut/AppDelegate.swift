@@ -20,6 +20,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var fullScreenController: FullScreenWindowController?
     var assertionID: IOPMAssertionID = 0
     var caffeinateItem: NSMenuItem!
+    var deepCleanXcodeItem: NSMenuItem!
     var isCaffeinated = false
     var dynamicStore: SCDynamicStore?
     var freePercent: Int = 0
@@ -174,6 +175,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         caffeinateItem.target = self
         menu.addItem(caffeinateItem)
         menu.addItem(NSMenuItem.separator())
+        deepCleanXcodeItem = NSMenuItem(title: "clean Xcode", action: #selector(deepCleanXcode), keyEquivalent: "k")
+        deepCleanXcodeItem.target = self
+        menu.addItem(deepCleanXcodeItem)
+        menu.addItem(NSMenuItem.separator())
         let timerItem = NSMenuItem(title: "Start Timer", action: #selector(startTimer), keyEquivalent: "t")
         timerItem.target = self
         menu.addItem(timerItem)
@@ -185,7 +190,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         timer?.invalidate()
-        statusItem?.button?.title = ""
+        statusItem?.button?.title = "\(freePercent)%"
         secondsElapsed = 0
         caffeinateItem?.state = isCaffeinated ? .on : .off
         for (index, proxy) in proxies.enumerated() {
@@ -239,6 +244,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    @objc func deepCleanXcode() {
+        print("Iniciando limpieza profunda de Xcode...")
+
+        let paths = [
+            "~/Library/Developer/Xcode/DerivedData/*",
+            "~/Library/Caches/com.apple.dt.Xcode"
+        ]
+
+        // 1. Borrar carpetas de caché y datos derivados
+        for path in paths {
+            let expandedPath = NSString(string: path).expandingTildeInPath
+            let task = Process()
+            task.launchPath = "/bin/rm"
+            task.arguments = ["-rf", expandedPath]
+            try? task.run()
+            task.waitUntilExit()
+        }
+
+        // 2. Matar SourceKitService (Xcode lo reinicia automáticamente)
+        let killTask = Process()
+        killTask.launchPath = "/usr/bin/killall"
+        killTask.arguments = ["-9", "SourceKitService"]
+        try? killTask.run()
+        killTask.waitUntilExit()
+
+        print("Limpieza completada. Derived Data eliminado y SourceKitService reiniciado.")
+    }
+
     @objc func startTimer() {
         secondsElapsed = 60
         timer?.invalidate()
@@ -253,7 +286,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             statusItem.button?.title = "\(freePercent)% (\(secondsElapsed)s)"
         } else {
             timer?.invalidate()
-            statusItem.button?.title = ""
+            statusItem.button?.title = "\(freePercent)%"
             showFullScreenImage()
         }
     }
