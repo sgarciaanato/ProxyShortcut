@@ -166,6 +166,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.delegate = self
             menu.addItem(proxyToggleItem)
         }
+        let httpAndHttpsItem = NSMenuItem(title: "toggle HTTP & HTTPS", action: #selector(toggleHttpAndHttps), keyEquivalent: "d")
+        httpAndHttpsItem.target = self
+        menu.addItem(httpAndHttpsItem)
         menu.addItem(NSMenuItem.separator())
         let zoomItem = NSMenuItem(title: "cl.mobile", action: #selector(openZoomRoom), keyEquivalent: "z")
         zoomItem.target = self
@@ -223,6 +226,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } catch {
             print("Error al ejecutar el comando: \(error)")
         }
+    }
+
+    @objc func toggleHttpAndHttps() {
+        guard let http = statusItem?.menu?.items[1], let https = statusItem?.menu?.items[2] else { return }
+        toggleProxy(http)
+        toggleProxy(https)
     }
 
     @objc func openZoomRoom() {
