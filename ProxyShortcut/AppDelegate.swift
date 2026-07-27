@@ -40,10 +40,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         memoryMonitor.start()
 
-        proxyManager.onProxyChanged = { [weak self] in
-            self?.proxyManager.checkAndFixAutoProxy()
-        }
         proxyManager.setupMonitor()
+        proxyManager.enforceDesiredState()
     }
 
     private func updateTitle(memory: Int) {

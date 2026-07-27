@@ -3,9 +3,9 @@ import SystemConfiguration
 
 class ProxyManager {
     private let interface: String
+    private let stateStore = ProxyStateStore()
     private var dynamicStore: SCDynamicStore?
-
-    var onProxyChanged: (() -> Void)?
+    private var pendingEnforcement: DispatchWorkItem?
 
     init(interface: String = "Wi-Fi") {
         self.interface = interface
@@ -21,7 +21,7 @@ class ProxyManager {
         dynamicStore = SCDynamicStoreCreate(nil, "ProxyMonitor" as CFString, { (_, _, info) in
             guard let info = info else { return }
             let manager = Unmanaged<ProxyManager>.fromOpaque(info).takeUnretainedValue()
-            DispatchQueue.main.async { manager.onProxyChanged?() }
+            DispatchQueue.main.async { manager.scheduleEnforcement() }
         }, &context)
 
         guard let store = dynamicStore else { return }
@@ -33,10 +33,20 @@ class ProxyManager {
         }
     }
 
-    func checkAndFixAutoProxy() {
-        let autoProxy = Proxy.all[0]
-        if getStatus(for: autoProxy) {
-            forceState(for: autoProxy, enabled: false)
+    /// Al conectar la VPN llegan varias notificaciones seguidas: las agrupamos
+    /// para no pelear con quien esté escribiendo la configuración en ese momento.
+    private func scheduleEnforcement() {
+        pendingEnforcement?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.enforceDesiredState() }
+        pendingEnforcement = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
+    }
+
+    func enforceDesiredState() {
+        for proxy in Proxy.all {
+            let desired = stateStore.desiredState(for: proxy)
+            guard getStatus(for: proxy) != desired else { continue }
+            apply(enabled: desired, to: proxy)
         }
     }
 
@@ -46,11 +56,16 @@ class ProxyManager {
     }
 
     func toggle(proxy: Proxy, currentlyEnabled: Bool) {
-        let state = currentlyEnabled ? "off" : "on"
-        runNetworkSetup(arguments: [proxy.setCommand, interface, state])
+        setState(enabled: !currentlyEnabled, for: proxy)
     }
 
-    func forceState(for proxy: Proxy, enabled: Bool) {
+    /// Cambio pedido por el usuario: pasa a ser el estado deseado.
+    func setState(enabled: Bool, for proxy: Proxy) {
+        stateStore.setDesiredState(enabled, for: proxy)
+        apply(enabled: enabled, to: proxy)
+    }
+
+    private func apply(enabled: Bool, to proxy: Proxy) {
         runNetworkSetup(arguments: [proxy.setCommand, interface, enabled ? "on" : "off"])
     }
 
